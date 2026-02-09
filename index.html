@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    .eye { width: 50%; height: 100vh; position: relative; border-right: 1px solid #222; float: left; }
+    video { display: none; }
+    #overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; }
+    button { padding: 20px; border-radius: 30px; border: none; font-weight: bold; cursor: pointer; background: #fff; }
+  </style>
+</head>
+<body>
+  <div id="overlay"><button id="start_btn">ENTER VISION PRO 2.0</button></div>
+  <video id="input_video" playsinline></video>
+  <div id="left" class="eye"></div>
+  <div id="right" class="eye"></div>
+
+<script>
+const videoElement = document.getElementById('input_video');
+const videoTexture = new THREE.VideoTexture(videoElement);
+const eyeConfigs = [];
+let typedText = "Notes: ";
+let isDarkMode = false;
+let pcStream = null;
+
+// Состояние системы
+const state = {
+    winX: 0, winY: 0.5, winScale: 1,
+    gyroAlpha: 0, gyroBeta: 0,
+    hands: [{}, {}]
+};
+
+function createLabel(text, size=40, color='white') {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = color; ctx.font = `bold ${size}px Arial`; ctx.textAlign = 'center';
+    ctx.fillText(text, 256, 80);
+    return new THREE.CanvasTexture(canvas);
+}
+
+function initEye(id) {
+    const container = document.getElementById(id);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, (window.innerWidth/2)/window.innerHeight, 0.1, 1000);
+    camera.position.z = 0.1;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth / 2, window.innerHeight);
+    container.appendChild(renderer.domElement);
+
+    const world = new THREE.Group();
+    scene.add(world);
+
+    // Панорама (VR пространство)
+    const envGeom = new THREE.SphereGeometry(10, 32, 32);
+    const envMat = new THREE.MeshBasicMaterial({ 
+        map: new THREE.TextureLoader().load('https://threejs.org/examples/textures/2294472375_b4a848c635_k.jpg'),
+        side: THREE.BackSide,
+        transparent: true, opacity: 0.5
+    });
+    const env = new THREE.Mesh(envGeom, envMat);
+    world.add(env);
+
+    // Видео фон
+    const bg = new THREE.Mesh(new THREE.PlaneGeometry(8, 6), new THREE.MeshBasicMaterial({ map: videoTexture }));
+    bg.position.z = -5;
+    scene.add(bg);
+
+    // Окно ОС
+    const osWin = new THREE.Group();
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(2, 1.2), new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.2, transparent: true }));
+    const content = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1), new THREE.MeshBasicMaterial({ transparent: true }));
+    osWin.add(glass, content);
+    osWin.position.set(0, 0, -2);
+    world.add(osWin);
+
+    // Физическая зона (Кубики)
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshNormalMaterial());
+    box.position.set(0.5, -0.5, -1.5);
+    world.add(box);
+
+    // Модельки рук (Скелет)
+    const handJoints = [[], []];
+    for(let h=0; h<2; h++){
+        const g = new THREE.Group();
+        for(let i=0; i<21; i++){
+            const s = new THREE.Mesh(new THREE.SphereGeometry(0.02), new THREE.MeshBasicMaterial({color: h==0?0x00ffcc:0xff00cc}));
+            handJoints[h].push(s); g.add(s);
+        }
+        scene.add(g);
+    }
+
+    return { scene, camera, renderer, world, osWin, content, handJoints, envMat, box };
+}
+
+eyeConfigs.push(initEye('left'), initEye('right'));
+
+// Гироскоп
+window.addEventListener('deviceorientation', (e) => {
+    state.gyroAlpha = THREE.MathUtils.degToRad(e.alpha);
+    state.gyroBeta = THREE.MathUtils.degToRad(e.beta - 90);
+});
+
+function onResults(results) {
+    eyeConfigs.forEach((config, eyeIdx) => {
+        // Стабилизация гироскопом
+        config.world.rotation.y = state.gyroAlpha;
+        config.world.rotation.x = state.gyroBeta;
+
+        config.handJoints.forEach(h => h.forEach(j => j.visible = false));
+
+        if (results.multiHandLandmarks) {
+            results.multiHandLandmarks.forEach((landmarks, hIdx) => {
+                const tip = landmarks[8]; const thumb = landmarks[4];
+                const x = (tip.x - 0.5) * 4; const y = (0.5 - tip.y) * 3;
+                
+                landmarks.forEach((lp, i) => {
+                    const j = config.handJoints[hIdx][i];
+                    j.visible = true;
+                    j.position.set((lp.x - 0.5) * 4, (0.5 - lp.y) * 3, -1);
+                });
+
+                const isPinch = Math.sqrt(Math.pow(tip.x-thumb.x,2) + Math.pow(tip.y-thumb.y,2)) < 0.05;
+                
+                // Взаимодействие с кубом (Physics Lab)
+                const dBox = config.box.position.distanceTo(config.handJoints[hIdx][8].position);
+                if(dBox < 0.2) config.box.position.lerp(config.handJoints[hIdx][8].position, 0.2);
+
+                // Управление окном
+                if(isPinch && hIdx == 0) {
+                    state.winX = x; state.winY = y;
+                }
+            });
+
+            // Масштабирование двумя руками
+            if(results.multiHandLandmarks.length == 2) {
+                const d = Math.abs(results.multiHandLandmarks[0][8].x - results.multiHandLandmarks[1][8].x);
+                state.winScale = d * 3;
+            }
+        }
+
+        config.osWin.position.set(state.winX, state.winY, -2);
+        config.osWin.scale.setScalar(state.winScale);
+        config.content.material.map = createLabel(typedText, 30);
+        config.envMat.opacity = isDarkMode ? 0.9 : 0.3;
+
+        config.renderer.render(config.scene, config.camera);
+    });
+}
+
+const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6 });
+hands.onResults(onResults);
+
+const cam = new Camera(videoElement, {
+    onFrame: async () => { await hands.send({image: videoElement}); },
+    facingMode: 'environment', width: 1280, height: 720
+});
+
+document.getElementById('start_btn').onclick = async () => {
+    document.getElementById('overlay').style.display='none';
+    if(DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission();
+    cam.start();
+};
+</script>
+</body>
+</html>
