@@ -3,25 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>VisionOS Ultimate v14.0</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; display: flex; font-family: sans-serif; }
-    .eye { width: 50%; height: 100vh; position: relative; border-right: 1px solid #333; }
+    body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    .eye { width: 50%; height: 100vh; position: relative; border-right: 1px solid #222; float: left; }
     video { display: none; }
-    #ui_layer { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; text-align: center; }
-    button { padding: 25px 50px; border-radius: 40px; border: none; font-weight: bold; cursor: pointer; font-size: 1.5rem; background: linear-gradient(45deg, #ff0000, #9900ff); color: white; box-shadow: 0 10px 30px rgba(255,0,0,0.3); }
-    #video_frame { position: fixed; width: 40%; height: 30%; top: 15%; left: 30%; z-index: 500; display: none; border-radius: 20px; box-shadow: 0 0 50px rgba(0,0,0,1); }
+    #ui_layer { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2000; text-align: center; }
+    button { padding: 20px 40px; border-radius: 50px; border: none; font-weight: bold; cursor: pointer; font-size: 1.2rem; background: linear-gradient(45deg, #00ffd5, #0077ff); color: white; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+    
+    /* Окно плеера - вынесено так, чтобы не мешать трекингу рук */
+    #video_container { 
+        position: fixed; width: 400px; height: 225px; 
+        bottom: 10%; left: 50%; transform: translateX(-50%); 
+        z-index: 100; display: none; border-radius: 12px; 
+        overflow: hidden; box-shadow: 0 0 30px rgba(255,0,0,0.4); 
+        background: #000;
+    }
+    iframe { width: 100%; height: 100%; }
   </style>
 </head>
 <body>
   <div id="ui_layer">
-    <h1 style="color: white; letter-spacing: 5px;">VISION OS ULTIMATE</h1>
-    <button id="start_btn">ЗАПУСК СИСТЕМЫ</button>
+    <h1 style="color: white; text-shadow: 0 0 15px #00ffd5;">VisionOS v14.0</h1>
+    <button id="start_btn">ВОЙТИ В СИСТЕМУ</button>
   </div>
+
+  <div id="video_container"><iframe id="yt_player" src="" frameborder="0" allow="autoplay; encrypted-media; fullscreen"></iframe></div>
   
-  <iframe id="video_frame" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
   <video id="input_video" playsinline></video>
   <div id="left" class="eye"></div>
   <div id="right" class="eye"></div>
@@ -30,47 +41,58 @@
     const videoElement = document.getElementById('input_video');
     const videoTexture = new THREE.VideoTexture(videoElement);
     const cityTexture = new THREE.TextureLoader().load('https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?q=80&w=1000');
-    const videoFrame = document.getElementById('video_frame');
-
+    
     const eyeConfigs = [];
-    let isVR = false, typedText = "Vision OS готова...", cooldown = false;
-    const state = { winX: 0, winY: 0.5, isListening: false };
+    let isVR = false, typedText = "Система активна.\nЖду команд...", cooldown = false;
+    let state = { winX: 0, winY: 0.5, isListening: false };
 
-    // ИНИЦИАЛИЗАЦИЯ ГОЛОСА
+    // --- МОЗГ ИИ (Speech API) ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+    
     if(recognition) {
         recognition.lang = 'ru-RU';
-        recognition.onresult = (e) => processAI(e.results[0][0].transcript);
+        recognition.onresult = (e) => {
+            const cmd = e.results[0][0].transcript.toLowerCase();
+            let reply = "";
+            const player = document.getElementById('yt_player');
+            const container = document.getElementById('video_container');
+
+            if(cmd.includes("включи") || cmd.includes("видео") || cmd.includes("горки") || cmd.includes("ютуб")) {
+                container.style.display = "block";
+                // Используем проверенное видео (Rollercoaster 360)
+                const videoId = "LXl2d7LDt6o"; 
+                player.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
+                reply = "Запускаю медиаплеер...";
+            } else if(cmd.includes("закрой") || cmd.includes("стоп") || cmd.includes("выключи")) {
+                container.style.display = "none";
+                player.src = "";
+                reply = "Плеер закрыт.";
+            } else if(cmd.includes("привет") || cmd.includes("здравствуй")) {
+                reply = "Привет, Брат! Системы VisionOS к работе готовы.";
+            } else if(cmd.includes("кто ты")) {
+                reply = "Я твой персональный ИИ-интерфейс.";
+            } else if(cmd.includes("как дела")) {
+                reply = "Статус системы: 100%. Все модули в норме.";
+            } else if(cmd.includes("фон") || cmd.includes("город")) {
+                isVR = !isVR;
+                reply = "Режим погружения изменен.";
+            } else {
+                reply = "Понял тебя: " + cmd;
+            }
+            typedText = "Вы: " + cmd + "\nИИ: " + reply;
+        };
         recognition.onend = () => { state.isListening = false; };
     }
 
-    function processAI(cmd) {
-        const low = cmd.toLowerCase();
-        typedText = "Запрос: " + cmd;
-        
-        if(low.includes("видео") || low.includes("ютуб") || low.includes("включи")) {
-            const query = low.replace("включи", "").replace("видео", "").replace("ютуб", "").trim();
-            // Используем YouTube Search URL для встраивания (упрощенная логика)
-            videoFrame.src = `https://www.youtube.com/embed?listType=search&list=${query}`;
-            videoFrame.style.display = "block";
-            typedText += "\nИИ: Открываю плеер...";
-        } else if(low.includes("закрой")) {
-            videoFrame.style.display = "none";
-            videoFrame.src = "";
-            typedText += "\nИИ: Плеер закрыт.";
-        } else if(low.includes("фон")) {
-            isVR = !isVR;
-            typedText += "\nИИ: Режим изменен.";
-        }
-    }
-
+    // --- ОТРИСОВКА ИНТЕРФЕЙСА ---
     function createTextCanvas(text) {
       const canvas = document.createElement('canvas');
       canvas.width = 512; canvas.height = 256;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 28px Arial';
-      text.split('\n').forEach((l, i) => ctx.fillText(l, 20, 50 + i*40));
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; 
+      ctx.font = 'bold 26px Arial';
+      text.split('\n').forEach((line, i) => ctx.fillText(line, 20, 50 + i*40));
       return new THREE.CanvasTexture(canvas);
     }
 
@@ -85,24 +107,27 @@
 
       const vPlane = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.5), new THREE.MeshBasicMaterial({ map: videoTexture }));
       scene.add(vPlane);
+      
       const cPlane = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.5), new THREE.MeshBasicMaterial({ map: cityTexture, transparent: true, opacity: 0 }));
       scene.add(cPlane);
 
-      // Заметки
+      // Окно заметок (Центральный хаб)
       const noteGroup = new THREE.Group();
-      noteGroup.add(new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.0), new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0.7, transparent: true })));
-      const noteText = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.9), new THREE.MeshBasicMaterial({ transparent: true }));
-      noteGroup.add(noteText); scene.add(noteGroup);
+      noteGroup.add(new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.9), new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0.75, transparent: true })));
+      const noteText = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.8), new THREE.MeshBasicMaterial({ transparent: true }));
+      noteGroup.add(noteText); 
+      scene.add(noteGroup);
 
-      // СФЕРЫ УПРАВЛЕНИЯ
-      const whiteSphere = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color: 0xffffff })); // VR
-      whiteSphere.position.set(1.7, 0.9, 0.8); scene.add(whiteSphere);
-
-      const redSphere = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color: 0xff0000 })); // YouTube
-      redSphere.position.set(-1.7, 0.9, 0.8); scene.add(redSphere);
-
-      const purpleSphere = new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshBasicMaterial({ color: 0x9900ff })); // AI
-      purpleSphere.position.set(0, -0.8, 0.8); scene.add(purpleSphere);
+      // Сферы управления
+      const spheres = {
+          vr: new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color: 0xffffff })), // Белая
+          ai: new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshBasicMaterial({ color: 0x9900ff })), // Фиолетовая
+          yt: new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color: 0xff0000 }))  // Красная
+      };
+      spheres.vr.position.set(1.7, 0.9, 0.8);
+      spheres.yt.position.set(-1.7, 0.9, 0.8);
+      spheres.ai.position.set(0, -0.85, 0.8);
+      Object.values(spheres).forEach(s => scene.add(s));
 
       const joints = [];
       for(let i=0; i<21; i++) {
@@ -110,14 +135,16 @@
         scene.add(s); joints.push(s);
       }
 
-      return { scene, camera, renderer, vPlane, cPlane, joints, noteGroup, noteText, whiteSphere, redSphere, purpleSphere };
+      return { scene, camera, renderer, vPlane, cPlane, joints, noteGroup, noteText, spheres };
     }
 
     eyeConfigs.push(initEye('left'), initEye('right'));
 
+    // --- ГЛАВНЫЙ ЦИКЛ (Трекинг и Логика) ---
     function onResults(results) {
       eyeConfigs.forEach((config) => {
         config.joints.forEach(j => j.visible = false);
+        
         if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
           const landmarks = results.multiHandLandmarks[0];
           const tip = landmarks[8], thumb = landmarks[4];
@@ -131,41 +158,55 @@
           const isPinching = Math.sqrt(Math.pow(tip.x - thumb.x, 2) + Math.pow(tip.y - thumb.y, 2)) < 0.05;
 
           if(isPinching && !cooldown) {
-            // Клик по КРАСНОЙ сфере (YouTube)
-            if(Math.sqrt(Math.pow(x-config.redSphere.position.x, 2) + Math.pow(y-config.redSphere.position.y, 2)) < 0.25) {
-                if(videoFrame.style.display === "none") {
-                    typedText = "Скажите: 'Включи [название]'";
-                } else {
-                    videoFrame.style.display = "none"; videoFrame.src = "";
-                }
-                cooldown = true; setTimeout(() => cooldown = false, 800);
+            // 1. Смена VR режима (Белая сфера)
+            if(Math.sqrt(Math.pow(x-1.7,2)+Math.pow(y-0.9,2)) < 0.25) { 
+                isVR = !isVR; cooldown = true; 
+                if(navigator.vibrate) navigator.vibrate(50);
             }
-            // Клик по ФИОЛЕТОВОЙ сфере (ИИ)
-            if(Math.sqrt(Math.pow(x-config.purpleSphere.position.x, 2) + Math.pow(y-config.purpleSphere.position.y, 2)) < 0.3) {
+            // 2. Активация ИИ (Фиолетовая сфера)
+            else if(Math.sqrt(Math.pow(x-0,2)+Math.pow(y+0.85,2)) < 0.3) { 
                 if(recognition && !state.isListening) { recognition.start(); state.isListening = true; }
-                cooldown = true; setTimeout(() => cooldown = false, 1000);
+                cooldown = true; 
+                if(navigator.vibrate) navigator.vibrate(100);
             }
-            // Клик по БЕЛОЙ сфере (VR)
-            if(Math.sqrt(Math.pow(x-config.whiteSphere.position.x, 2) + Math.pow(y-config.whiteSphere.position.y, 2)) < 0.25) {
-                isVR = !isVR;
-                cooldown = true; setTimeout(() => cooldown = false, 800);
+            // 3. Закрыть YouTube (Красная сфера)
+            else if(Math.sqrt(Math.pow(x+1.7,2)+Math.pow(y-0.9,2)) < 0.25) {
+                document.getElementById('video_container').style.display = "none";
+                document.getElementById('yt_player').src = "";
+                cooldown = true;
             }
+            // 4. Перемещение окна (Захват за центр)
+            else if(Math.sqrt(Math.pow(x-state.winX,2)+Math.pow(y-state.winY,2)) < 0.7) {
+                state.winX = x; state.winY = y;
+            }
+            
+            if(cooldown) setTimeout(() => cooldown = false, 800);
           }
           config.noteGroup.position.set(state.winX, state.winY, 0.5);
-          config.purpleSphere.scale.setScalar(state.isListening ? 1.5 : 1);
+          config.spheres.ai.scale.setScalar(state.isListening ? 1.4 : 1);
         }
+        
+        // Рендеринг изменений
         config.noteText.material.map = createTextCanvas(typedText);
-        config.cPlane.material.opacity += ((isVR ? 1 : 0) - config.cPlane.material.opacity) * 0.1;
+        config.cPlane.material.opacity += ((isVR ? 1 : 0) - config.cPlane.material.opacity) * 0.15;
         config.vPlane.material.opacity = 1 - config.cPlane.material.opacity;
         config.renderer.render(config.scene, config.camera);
       });
     }
 
     const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.75 });
     hands.onResults(onResults);
-    const cam = new Camera(videoElement, { onFrame: async () => { await hands.send({image: videoElement}); }, facingMode: 'environment', width: 1280, height: 720 });
-    document.getElementById('start_btn').onclick = () => { document.getElementById('ui_layer').style.display='none'; cam.start(); };
+    
+    const cam = new Camera(videoElement, { 
+        onFrame: async () => { await hands.send({image: videoElement}); }, 
+        facingMode: 'environment', width: 1280, height: 720 
+    });
+
+    document.getElementById('start_btn').onclick = () => { 
+        document.getElementById('ui_layer').style.display='none'; 
+        cam.start(); 
+    };
   </script>
 </body>
 </html>
