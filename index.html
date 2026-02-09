@@ -7,168 +7,150 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; }
-    .eye { width: 50%; height: 100vh; position: relative; border-right: 1px solid #222; float: left; }
+    body { margin: 0; overflow: hidden; background: #000; display: flex; font-family: sans-serif; }
+    .eye { width: 50%; height: 100vh; position: relative; border-right: 1px solid #333; }
     video { display: none; }
-    #overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; }
-    button { padding: 20px; border-radius: 30px; border: none; font-weight: bold; cursor: pointer; background: #fff; }
+    #ui_layer { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; text-align: center; }
+    button { padding: 25px 50px; border-radius: 40px; border: none; font-weight: bold; cursor: pointer; font-size: 1.5rem; background: linear-gradient(45deg, #9900ff, #0077ff); color: white; }
   </style>
 </head>
 <body>
-  <div id="overlay"><button id="start_btn">ENTER VISION PRO 2.0</button></div>
+  <div id="ui_layer">
+    <h1 style="color: white; text-shadow: 0 0 10px #9900ff;">VisionOS 12.0 AI</h1>
+    <button id="start_btn">АКТИВИРОВАТЬ ИИ</button>
+  </div>
   <video id="input_video" playsinline></video>
   <div id="left" class="eye"></div>
   <div id="right" class="eye"></div>
 
-<script>
-const videoElement = document.getElementById('input_video');
-const videoTexture = new THREE.VideoTexture(videoElement);
-const eyeConfigs = [];
-let typedText = "Notes: ";
-let isDarkMode = false;
-let pcStream = null;
+  <script>
+    const videoElement = document.getElementById('input_video');
+    const videoTexture = new THREE.VideoTexture(videoElement);
+    const cityTexture = new THREE.TextureLoader().load('https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?q=80&w=1000');
 
-// Состояние системы
-const state = {
-    winX: 0, winY: 0.5, winScale: 1,
-    gyroAlpha: 0, gyroBeta: 0,
-    hands: [{}, {}]
-};
+    const eyeConfigs = [];
+    let isVR = false, typedText = localStorage.getItem('vision_notes') || "Готов к работе...", cooldown = false;
+    const state = JSON.parse(localStorage.getItem('vision_layout')) || { winX: 0, winY: 0.4, browserX: -1.2, browserY: 0.4 };
+    state.timeStr = "00:00";
+    state.isListening = false;
 
-function createLabel(text, size=40, color='white') {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512; canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = color; ctx.font = `bold ${size}px Arial`; ctx.textAlign = 'center';
-    ctx.fillText(text, 256, 80);
-    return new THREE.CanvasTexture(canvas);
-}
-
-function initEye(id) {
-    const container = document.getElementById(id);
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, (window.innerWidth/2)/window.innerHeight, 0.1, 1000);
-    camera.position.z = 0.1;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth / 2, window.innerHeight);
-    container.appendChild(renderer.domElement);
-
-    const world = new THREE.Group();
-    scene.add(world);
-
-    // Панорама (VR пространство)
-    const envGeom = new THREE.SphereGeometry(10, 32, 32);
-    const envMat = new THREE.MeshBasicMaterial({ 
-        map: new THREE.TextureLoader().load('https://threejs.org/examples/textures/2294472375_b4a848c635_k.jpg'),
-        side: THREE.BackSide,
-        transparent: true, opacity: 0.5
-    });
-    const env = new THREE.Mesh(envGeom, envMat);
-    world.add(env);
-
-    // Видео фон
-    const bg = new THREE.Mesh(new THREE.PlaneGeometry(8, 6), new THREE.MeshBasicMaterial({ map: videoTexture }));
-    bg.position.z = -5;
-    scene.add(bg);
-
-    // Окно ОС
-    const osWin = new THREE.Group();
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(2, 1.2), new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.2, transparent: true }));
-    const content = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1), new THREE.MeshBasicMaterial({ transparent: true }));
-    osWin.add(glass, content);
-    osWin.position.set(0, 0, -2);
-    world.add(osWin);
-
-    // Физическая зона (Кубики)
-    const box = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshNormalMaterial());
-    box.position.set(0.5, -0.5, -1.5);
-    world.add(box);
-
-    // Модельки рук (Скелет)
-    const handJoints = [[], []];
-    for(let h=0; h<2; h++){
-        const g = new THREE.Group();
-        for(let i=0; i<21; i++){
-            const s = new THREE.Mesh(new THREE.SphereGeometry(0.02), new THREE.MeshBasicMaterial({color: h==0?0x00ffcc:0xff00cc}));
-            handJoints[h].push(s); g.add(s);
-        }
-        scene.add(g);
+    // ИНИЦИАЛИЗАЦИЯ ГОЛОСА
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+    if(recognition) {
+        recognition.lang = 'ru-RU';
+        recognition.onresult = (e) => {
+            const transcript = e.results[0][0].transcript;
+            processAICommand(transcript);
+        };
+        recognition.onend = () => { state.isListening = false; };
     }
 
-    return { scene, camera, renderer, world, osWin, content, handJoints, envMat, box };
-}
+    function processAICommand(cmd) {
+        typedText = "Вы: " + cmd;
+        const lowCmd = cmd.toLowerCase();
+        let answer = "\nИИ: ";
+        if(lowCmd.includes("привет")) answer += "Привет, создатель!";
+        else if(lowCmd.includes("очистить")) { typedText = ""; answer = "Память очищена"; }
+        else if(lowCmd.includes("фон")) { isVR = !isVR; answer = "Режим изменен"; }
+        else if(lowCmd.includes("кто ты")) answer += "Я ядро твоей VisionOS.";
+        else answer += "Команда принята.";
+        typedText += answer;
+        localStorage.setItem('vision_notes', typedText);
+    }
 
-eyeConfigs.push(initEye('left'), initEye('right'));
+    function createTextCanvas(text, size = 30, width = 512, height = 256) {
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = `bold ${size}px Arial`;
+      const lines = text.split('\n');
+      lines.forEach((l, i) => ctx.fillText(l, 20, 50 + i*40));
+      return new THREE.CanvasTexture(canvas);
+    }
 
-// Гироскоп
-window.addEventListener('deviceorientation', (e) => {
-    state.gyroAlpha = THREE.MathUtils.degToRad(e.alpha);
-    state.gyroBeta = THREE.MathUtils.degToRad(e.beta - 90);
-});
+    function initEye(id) {
+      const container = document.getElementById(id);
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-2, 2, 1.2, -1.2, 0.1, 10);
+      camera.position.z = 5;
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth / 2, window.innerHeight);
+      container.appendChild(renderer.domElement);
 
-function onResults(results) {
-    eyeConfigs.forEach((config, eyeIdx) => {
-        // Стабилизация гироскопом
-        config.world.rotation.y = state.gyroAlpha;
-        config.world.rotation.x = state.gyroBeta;
+      const vPlane = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.5), new THREE.MeshBasicMaterial({ map: videoTexture }));
+      scene.add(vPlane);
+      const cPlane = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.5), new THREE.MeshBasicMaterial({ map: cityTexture, transparent: true, opacity: 0 }));
+      scene.add(cPlane);
 
-        config.handJoints.forEach(h => h.forEach(j => j.visible = false));
+      const noteGroup = new THREE.Group();
+      noteGroup.add(new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.0), new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0.8, transparent: true })));
+      const noteText = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.9), new THREE.MeshBasicMaterial({ transparent: true }));
+      noteGroup.add(noteText); scene.add(noteGroup);
 
-        if (results.multiHandLandmarks) {
-            results.multiHandLandmarks.forEach((landmarks, hIdx) => {
-                const tip = landmarks[8]; const thumb = landmarks[4];
-                const x = (tip.x - 0.5) * 4; const y = (0.5 - tip.y) * 3;
-                
-                landmarks.forEach((lp, i) => {
-                    const j = config.handJoints[hIdx][i];
-                    j.visible = true;
-                    j.position.set((lp.x - 0.5) * 4, (0.5 - lp.y) * 3, -1);
-                });
+      // СФЕРА ИИ
+      const aiSphere = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0x9900ff }));
+      aiSphere.position.set(0, -0.6, 0.8); scene.add(aiSphere);
 
-                const isPinch = Math.sqrt(Math.pow(tip.x-thumb.x,2) + Math.pow(tip.y-thumb.y,2)) < 0.05;
-                
-                // Взаимодействие с кубом (Physics Lab)
-                const dBox = config.box.position.distanceTo(config.handJoints[hIdx][8].position);
-                if(dBox < 0.2) config.box.position.lerp(config.handJoints[hIdx][8].position, 0.2);
+      const crown = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      crown.position.set(1.7, 1.0, 0.8); scene.add(crown);
 
-                // Управление окном
-                if(isPinch && hIdx == 0) {
-                    state.winX = x; state.winY = y;
+      const joints = [];
+      for(let i=0; i<21; i++) {
+        const s = new THREE.Mesh(new THREE.SphereGeometry(0.02), new THREE.MeshBasicMaterial({color: 0x00ffcc}));
+        scene.add(s); joints.push(s);
+      }
+
+      return { scene, camera, renderer, vPlane, cPlane, joints, noteGroup, noteText, aiSphere, crown };
+    }
+
+    eyeConfigs.push(initEye('left'), initEye('right'));
+
+    function onResults(results) {
+      state.timeStr = new Date().toLocaleTimeString().slice(0,5);
+      eyeConfigs.forEach((config) => {
+        config.joints.forEach(j => j.visible = false);
+        if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
+          const landmarks = results.multiHandLandmarks[0];
+          const tip = landmarks[8], thumb = landmarks[4];
+          const x = (tip.x - 0.5) * 4, y = (0.5 - tip.y) * 2.4;
+          landmarks.forEach((lp, i) => {
+            config.joints[i].visible = true;
+            config.joints[i].position.set((lp.x - 0.5) * 4, (0.5 - lp.y) * 2.4, 1.1);
+          });
+
+          const isPinching = Math.sqrt(Math.pow(tip.x - thumb.x, 2) + Math.pow(tip.y - thumb.y, 2)) < 0.05;
+
+          if(isPinching && !cooldown) {
+            // Клик по сфере ИИ
+            if(Math.sqrt(Math.pow(x-config.aiSphere.position.x, 2) + Math.pow(y-config.aiSphere.position.y, 2)) < 0.3) {
+                if(recognition && !state.isListening) {
+                    recognition.start(); state.isListening = true;
+                    if(navigator.vibrate) navigator.vibrate(100);
                 }
-            });
-
-            // Масштабирование двумя руками
-            if(results.multiHandLandmarks.length == 2) {
-                const d = Math.abs(results.multiHandLandmarks[0][8].x - results.multiHandLandmarks[1][8].x);
-                state.winScale = d * 3;
+                cooldown = true; setTimeout(() => cooldown = false, 1000);
             }
+            // Перемещение окна
+            if(Math.sqrt(Math.pow(x-state.winX, 2) + Math.pow(y-state.winY, 2)) < 0.6) {
+                state.winX = x; state.winY = y;
+                localStorage.setItem('vision_layout', JSON.stringify(state));
+            }
+          }
+          config.noteGroup.position.set(state.winX, state.winY, 0.5);
+          config.aiSphere.scale.setScalar(state.isListening ? 1.5 + Math.sin(Date.now()*0.01)*0.2 : 1);
         }
-
-        config.osWin.position.set(state.winX, state.winY, -2);
-        config.osWin.scale.setScalar(state.winScale);
-        config.content.material.map = createLabel(typedText, 30);
-        config.envMat.opacity = isDarkMode ? 0.9 : 0.3;
-
+        config.noteText.material.map = createTextCanvas(state.timeStr + "\n" + typedText);
+        config.cPlane.material.opacity += ((isVR ? 1 : 0) - config.cPlane.material.opacity) * 0.1;
+        config.vPlane.material.opacity = 1 - config.cPlane.material.opacity;
         config.renderer.render(config.scene, config.camera);
-    });
-}
+      });
+    }
 
-const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6 });
-hands.onResults(onResults);
-
-const cam = new Camera(videoElement, {
-    onFrame: async () => { await hands.send({image: videoElement}); },
-    facingMode: 'environment', width: 1280, height: 720
-});
-
-document.getElementById('start_btn').onclick = async () => {
-    document.getElementById('overlay').style.display='none';
-    if(DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission();
-    cam.start();
-};
-</script>
+    const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
+    hands.onResults(onResults);
+    const cam = new Camera(videoElement, { onFrame: async () => { await hands.send({image: videoElement}); }, facingMode: 'environment', width: 1280, height: 720 });
+    document.getElementById('start_btn').onclick = () => { document.getElementById('ui_layer').style.display='none'; cam.start(); };
+  </script>
 </body>
 </html>
