@@ -11,14 +11,17 @@
     .eye { width: 50%; height: 100vh; position: relative; border-right: 1px solid #333; }
     video { display: none; }
     #ui_layer { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; text-align: center; }
-    button { padding: 25px 50px; border-radius: 40px; border: none; font-weight: bold; cursor: pointer; font-size: 1.5rem; background: linear-gradient(45deg, #9900ff, #0077ff); color: white; }
+    button { padding: 25px 50px; border-radius: 40px; border: none; font-weight: bold; cursor: pointer; font-size: 1.5rem; background: linear-gradient(45deg, #ff0000, #9900ff); color: white; box-shadow: 0 10px 30px rgba(255,0,0,0.3); }
+    #video_frame { position: fixed; width: 40%; height: 30%; top: 15%; left: 30%; z-index: 500; display: none; border-radius: 20px; box-shadow: 0 0 50px rgba(0,0,0,1); }
   </style>
 </head>
 <body>
   <div id="ui_layer">
-    <h1 style="color: white; text-shadow: 0 0 10px #9900ff;">VisionOS 12.0 AI</h1>
-    <button id="start_btn">АКТИВИРОВАТЬ ИИ</button>
+    <h1 style="color: white; letter-spacing: 5px;">VISION OS ULTIMATE</h1>
+    <button id="start_btn">ЗАПУСК СИСТЕМЫ</button>
   </div>
+  
+  <iframe id="video_frame" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
   <video id="input_video" playsinline></video>
   <div id="left" class="eye"></div>
   <div id="right" class="eye"></div>
@@ -27,45 +30,47 @@
     const videoElement = document.getElementById('input_video');
     const videoTexture = new THREE.VideoTexture(videoElement);
     const cityTexture = new THREE.TextureLoader().load('https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?q=80&w=1000');
+    const videoFrame = document.getElementById('video_frame');
 
     const eyeConfigs = [];
-    let isVR = false, typedText = localStorage.getItem('vision_notes') || "Готов к работе...", cooldown = false;
-    const state = JSON.parse(localStorage.getItem('vision_layout')) || { winX: 0, winY: 0.4, browserX: -1.2, browserY: 0.4 };
-    state.timeStr = "00:00";
-    state.isListening = false;
+    let isVR = false, typedText = "Vision OS готова...", cooldown = false;
+    const state = { winX: 0, winY: 0.5, isListening: false };
 
     // ИНИЦИАЛИЗАЦИЯ ГОЛОСА
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = SpeechRecognition ? new SpeechRecognition() : null;
     if(recognition) {
         recognition.lang = 'ru-RU';
-        recognition.onresult = (e) => {
-            const transcript = e.results[0][0].transcript;
-            processAICommand(transcript);
-        };
+        recognition.onresult = (e) => processAI(e.results[0][0].transcript);
         recognition.onend = () => { state.isListening = false; };
     }
 
-    function processAICommand(cmd) {
-        typedText = "Вы: " + cmd;
-        const lowCmd = cmd.toLowerCase();
-        let answer = "\nИИ: ";
-        if(lowCmd.includes("привет")) answer += "Привет, создатель!";
-        else if(lowCmd.includes("очистить")) { typedText = ""; answer = "Память очищена"; }
-        else if(lowCmd.includes("фон")) { isVR = !isVR; answer = "Режим изменен"; }
-        else if(lowCmd.includes("кто ты")) answer += "Я ядро твоей VisionOS.";
-        else answer += "Команда принята.";
-        typedText += answer;
-        localStorage.setItem('vision_notes', typedText);
+    function processAI(cmd) {
+        const low = cmd.toLowerCase();
+        typedText = "Запрос: " + cmd;
+        
+        if(low.includes("видео") || low.includes("ютуб") || low.includes("включи")) {
+            const query = low.replace("включи", "").replace("видео", "").replace("ютуб", "").trim();
+            // Используем YouTube Search URL для встраивания (упрощенная логика)
+            videoFrame.src = `https://www.youtube.com/embed?listType=search&list=${query}`;
+            videoFrame.style.display = "block";
+            typedText += "\nИИ: Открываю плеер...";
+        } else if(low.includes("закрой")) {
+            videoFrame.style.display = "none";
+            videoFrame.src = "";
+            typedText += "\nИИ: Плеер закрыт.";
+        } else if(low.includes("фон")) {
+            isVR = !isVR;
+            typedText += "\nИИ: Режим изменен.";
+        }
     }
 
-    function createTextCanvas(text, size = 30, width = 512, height = 256) {
+    function createTextCanvas(text) {
       const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
+      canvas.width = 512; canvas.height = 256;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = `bold ${size}px Arial`;
-      const lines = text.split('\n');
-      lines.forEach((l, i) => ctx.fillText(l, 20, 50 + i*40));
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 28px Arial';
+      text.split('\n').forEach((l, i) => ctx.fillText(l, 20, 50 + i*40));
       return new THREE.CanvasTexture(canvas);
     }
 
@@ -83,17 +88,21 @@
       const cPlane = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.5), new THREE.MeshBasicMaterial({ map: cityTexture, transparent: true, opacity: 0 }));
       scene.add(cPlane);
 
+      // Заметки
       const noteGroup = new THREE.Group();
-      noteGroup.add(new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.0), new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0.8, transparent: true })));
+      noteGroup.add(new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.0), new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0.7, transparent: true })));
       const noteText = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.9), new THREE.MeshBasicMaterial({ transparent: true }));
       noteGroup.add(noteText); scene.add(noteGroup);
 
-      // СФЕРА ИИ
-      const aiSphere = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0x9900ff }));
-      aiSphere.position.set(0, -0.6, 0.8); scene.add(aiSphere);
+      // СФЕРЫ УПРАВЛЕНИЯ
+      const whiteSphere = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color: 0xffffff })); // VR
+      whiteSphere.position.set(1.7, 0.9, 0.8); scene.add(whiteSphere);
 
-      const crown = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-      crown.position.set(1.7, 1.0, 0.8); scene.add(crown);
+      const redSphere = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color: 0xff0000 })); // YouTube
+      redSphere.position.set(-1.7, 0.9, 0.8); scene.add(redSphere);
+
+      const purpleSphere = new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshBasicMaterial({ color: 0x9900ff })); // AI
+      purpleSphere.position.set(0, -0.8, 0.8); scene.add(purpleSphere);
 
       const joints = [];
       for(let i=0; i<21; i++) {
@@ -101,19 +110,19 @@
         scene.add(s); joints.push(s);
       }
 
-      return { scene, camera, renderer, vPlane, cPlane, joints, noteGroup, noteText, aiSphere, crown };
+      return { scene, camera, renderer, vPlane, cPlane, joints, noteGroup, noteText, whiteSphere, redSphere, purpleSphere };
     }
 
     eyeConfigs.push(initEye('left'), initEye('right'));
 
     function onResults(results) {
-      state.timeStr = new Date().toLocaleTimeString().slice(0,5);
       eyeConfigs.forEach((config) => {
         config.joints.forEach(j => j.visible = false);
         if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
           const landmarks = results.multiHandLandmarks[0];
           const tip = landmarks[8], thumb = landmarks[4];
           const x = (tip.x - 0.5) * 4, y = (0.5 - tip.y) * 2.4;
+          
           landmarks.forEach((lp, i) => {
             config.joints[i].visible = true;
             config.joints[i].position.set((lp.x - 0.5) * 4, (0.5 - lp.y) * 2.4, 1.1);
@@ -122,24 +131,30 @@
           const isPinching = Math.sqrt(Math.pow(tip.x - thumb.x, 2) + Math.pow(tip.y - thumb.y, 2)) < 0.05;
 
           if(isPinching && !cooldown) {
-            // Клик по сфере ИИ
-            if(Math.sqrt(Math.pow(x-config.aiSphere.position.x, 2) + Math.pow(y-config.aiSphere.position.y, 2)) < 0.3) {
-                if(recognition && !state.isListening) {
-                    recognition.start(); state.isListening = true;
-                    if(navigator.vibrate) navigator.vibrate(100);
+            // Клик по КРАСНОЙ сфере (YouTube)
+            if(Math.sqrt(Math.pow(x-config.redSphere.position.x, 2) + Math.pow(y-config.redSphere.position.y, 2)) < 0.25) {
+                if(videoFrame.style.display === "none") {
+                    typedText = "Скажите: 'Включи [название]'";
+                } else {
+                    videoFrame.style.display = "none"; videoFrame.src = "";
                 }
+                cooldown = true; setTimeout(() => cooldown = false, 800);
+            }
+            // Клик по ФИОЛЕТОВОЙ сфере (ИИ)
+            if(Math.sqrt(Math.pow(x-config.purpleSphere.position.x, 2) + Math.pow(y-config.purpleSphere.position.y, 2)) < 0.3) {
+                if(recognition && !state.isListening) { recognition.start(); state.isListening = true; }
                 cooldown = true; setTimeout(() => cooldown = false, 1000);
             }
-            // Перемещение окна
-            if(Math.sqrt(Math.pow(x-state.winX, 2) + Math.pow(y-state.winY, 2)) < 0.6) {
-                state.winX = x; state.winY = y;
-                localStorage.setItem('vision_layout', JSON.stringify(state));
+            // Клик по БЕЛОЙ сфере (VR)
+            if(Math.sqrt(Math.pow(x-config.whiteSphere.position.x, 2) + Math.pow(y-config.whiteSphere.position.y, 2)) < 0.25) {
+                isVR = !isVR;
+                cooldown = true; setTimeout(() => cooldown = false, 800);
             }
           }
           config.noteGroup.position.set(state.winX, state.winY, 0.5);
-          config.aiSphere.scale.setScalar(state.isListening ? 1.5 + Math.sin(Date.now()*0.01)*0.2 : 1);
+          config.purpleSphere.scale.setScalar(state.isListening ? 1.5 : 1);
         }
-        config.noteText.material.map = createTextCanvas(state.timeStr + "\n" + typedText);
+        config.noteText.material.map = createTextCanvas(typedText);
         config.cPlane.material.opacity += ((isVR ? 1 : 0) - config.cPlane.material.opacity) * 0.1;
         config.vPlane.material.opacity = 1 - config.cPlane.material.opacity;
         config.renderer.render(config.scene, config.camera);
